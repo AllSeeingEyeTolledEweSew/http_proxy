@@ -49,7 +49,10 @@ class LintCommand(distutils.cmd.Command):
 
     def run_autoflake(self):
         subprocess.check_call([
-            "pylint", "http_proxy", "http_proxy_test", "setup.py",
+            "pylint",
+            "http_proxy",
+            "http_proxy_test",
+            "setup.py",
         ])
 
     def run(self):

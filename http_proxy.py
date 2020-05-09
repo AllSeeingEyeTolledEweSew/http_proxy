@@ -1,13 +1,13 @@
 # The author disclaims copyright to this source code. Please see the
 # accompanying UNLICENSE file.
 
-import socket
-import select
+import argparse
 import base64
 import http.client
 import http.server
+import select
+import socket
 import traceback
-import argparse
 import urllib.parse
 
 
@@ -26,6 +26,7 @@ class _HTTPError(Exception):
 
 
 def read_to_end_of_chunks(file_like):
+
     def inner():
         while True:
             size_line = file_like.readline()
@@ -101,7 +102,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return True
 
         # send_error doesn't let us send headers, so do it by hand
-        self.log_error("code %d, message %s", 407, "Proxy authorization required")
+        self.log_error("code %d, message %s", 407,
+                       "Proxy authorization required")
         self.send_response(407, "Proxy authorization required")
         self.send_header("Connection", "close")
         self.send_header("Proxy-Authenticate", "Basic")
@@ -148,7 +150,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             upstream = self.connect_request()
         except _HTTPError as err:
             self.send_error(err.code, message=err.message, explain=err.explain)
-        except: # pylint:disable=bare-except
+        except:  # pylint:disable=bare-except
             self.log_error("%s", traceback.format_exc())
             self.send_error(500, explain=traceback.format_exc())
 
@@ -161,7 +163,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         try:
             self.bidirectional_proxy(upstream)
-        except: # pylint:disable=bare-except
+        except:  # pylint:disable=bare-except
             self.log_error("%s", traceback.format_exc())
             self.close_connection = True
 
@@ -191,21 +193,27 @@ class Handler(http.server.BaseHTTPRequestHandler):
             raise _HTTPError(411)
 
         try:
-            upstream = http.client.HTTPConnection(url.netloc, timeout=self.timeout)
+            upstream = http.client.HTTPConnection(url.netloc,
+                                                  timeout=self.timeout)
         except http.client.InvalidURL as exc:
-            raise _HTTPError(400, message=str(exc), explain=traceback.format_exc())
+            raise _HTTPError(400,
+                             message=str(exc),
+                             explain=traceback.format_exc())
 
         path = urllib.parse.urlunsplit(("", "", url.path, url.query, ""))
-        upstream.putrequest(self.command, path, skip_host=True,
-                skip_accept_encoding=True)
+        upstream.putrequest(self.command,
+                            path,
+                            skip_host=True,
+                            skip_accept_encoding=True)
 
         connection_tokens = []
-        filter_headers = set(("proxy-authorization", "connection", "keep-alive"))
+        filter_headers = set(
+            ("proxy-authorization", "connection", "keep-alive"))
         pass_headers = set(("transfer-encoding", "te", "trailer"))
         if "Connection" in self.headers:
             request_connection_tokens = [
-                token.strip() for token in
-                self.headers["Connection"].split(",")]
+                token.strip() for token in self.headers["Connection"].split(",")
+            ]
         else:
             request_connection_tokens = []
         for token in request_connection_tokens:
@@ -245,7 +253,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             raise _HTTPError(502, explain=traceback.format_exc())
         except ChunkError as exc:
             upstream.close()
-            raise _HTTPError(400, message=str(exc), explain=traceback.format_exc())
+            raise _HTTPError(400,
+                             message=str(exc),
+                             explain=traceback.format_exc())
 
     def proxy_response(self, response):
         # send_response supplies some headers unconditionally
@@ -253,12 +263,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_response_only(response.code, response.reason)
 
         connection_tokens = []
-        filter_headers = set(("proxy-authorization", "connection", "keep-alive"))
+        filter_headers = set(
+            ("proxy-authorization", "connection", "keep-alive"))
         pass_headers = set(("transfer-encoding", "te", "trailer"))
         if response.getheader("Connection"):
             response_connection_tokens = [
-                token.strip() for token in
-                response.getheader("Connection").split(",")]
+                token.strip()
+                for token in response.getheader("Connection").split(",")
+            ]
         else:
             response_connection_tokens = []
         for token in response_connection_tokens:
@@ -312,7 +324,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             upstream, response = self.proxy_request()
         except _HTTPError as exc:
             self.send_error(exc.code, message=exc.message, explain=exc.explain)
-        except: # pylint:disable=bare-except
+        except:  # pylint:disable=bare-except
             self.log_error("%s", traceback.format_exc())
             self.send_error(500, explain=traceback.format_exc())
 
@@ -321,7 +333,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         try:
             self.proxy_response(response)
-        except: # pylint:disable=bare-except
+        except:  # pylint:disable=bare-except
             self.log_error("%s", traceback.format_exc())
             self.close_connection = True
 
