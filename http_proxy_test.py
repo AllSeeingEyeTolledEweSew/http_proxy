@@ -1,6 +1,8 @@
 # The author disclaims copyright to this source code. Please see the
 # accompanying UNLICENSE file.
 
+"""Tests for http_proxy."""
+
 import collections
 import http.client
 import http.server
@@ -19,33 +21,42 @@ DATA = bytes(i % 256 for i in range(LEN))
 
 
 def get_chunks():
+    """Yields fixture data in arbitrary-sized chunks."""
     for i in range(0, LEN, CHUNK):
         yield DATA[i:i + CHUNK]
 
 
 class FixtureHandler(http.server.BaseHTTPRequestHandler):
+    """Handler class for HTTP server test cases."""
+
+    # pylint: disable=too-many-public-methods
 
     def path_empty(self):
+        """Send an empty response with Content-Length: 0"""
         self.send_response(200)
         self.send_header("Connection", "close")
         self.send_header("Content-Length", "0")
         self.end_headers()
 
     def path_empty_no_length(self):
+        """Send an empty response with no Content-Length"""
         self.send_response(200)
         self.send_header("Connection", "close")
         self.end_headers()
 
     def path_empty_with_hop_by_hop(self):
+        """Send an empty response with a nonstandard hop-by-hop header"""
         self.send_response(200)
         self.send_header("Connection", "close, X-Magic")
         self.send_header("X-Magic", "abcd1234")
         self.end_headers()
 
     def path_bad_status_line(self):
+        """Send a bad HTTP response status line"""
         self.wfile.write(b"HTTP/1.1 whoopsie\r\n")
 
     def path_data(self):
+        """Send some data with Content-Length"""
         self.send_response(200)
         self.send_header("Connection", "close")
         self.send_header("Content-Length", str(LEN))
@@ -53,6 +64,7 @@ class FixtureHandler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(DATA)
 
     def path_data_short(self):
+        """Send some data, truncated according to its Content-Length"""
         self.send_response(200)
         self.send_header("Connection", "close")
         self.send_header("Content-Length", str(LEN))
@@ -60,12 +72,14 @@ class FixtureHandler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(DATA[:LEN // 2])
 
     def path_data_no_length(self):
+        """Send some data with no Content-Length"""
         self.send_response(200)
         self.send_header("Connection", "close")
         self.end_headers()
         self.wfile.write(DATA)
 
     def path_data_with_invalid_length(self):
+        """Send some data with a garbage Content-Length"""
         self.send_response(200)
         self.send_header("Connection", "close")
         self.send_header("Content-Length", "whoopsie")
@@ -73,6 +87,7 @@ class FixtureHandler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(DATA)
 
     def path_data_chunked(self):
+        """Send some data using chunked encoding"""
         self.send_response(200)
         self.send_header("Connection", "close, Transfer-Encoding")
         self.send_header("Transfer-Encoding", "chunked")
@@ -84,6 +99,7 @@ class FixtureHandler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(b"0\r\n\r\n")
 
     def path_data_chunked_invalid(self):
+        """Send some chunked encoding with an invalid chunk size"""
         self.send_response(200)
         self.send_header("Connection", "close, Transfer-Encoding")
         self.send_header("Transfer-Encoding", "chunked")
@@ -91,6 +107,7 @@ class FixtureHandler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(b"whoopsie\r\n")
 
     def path_data_chunked_short(self):
+        """Send some truncated chunked encoding"""
         self.send_response(200)
         self.send_header("Connection", "close, Transfer-Encoding")
         self.send_header("Transfer-Encoding", "chunked")
@@ -98,6 +115,7 @@ class FixtureHandler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(b"123\r\n")
 
     def path_trailers(self):
+        """Send some data using chunked encoding with HTTP trailers"""
         self.send_response(200)
         self.send_header("Connection", "close, Transfer-Encoding")
         self.send_header("Transfer-Encoding", "chunked")
@@ -112,6 +130,7 @@ class FixtureHandler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(b"\r\n")
 
     def path_reflect_headers(self):
+        """Send the received headers and status line as JSON"""
         data = dict(requestline=self.requestline,
                     headers=dict(self.headers.items()))
         data = json.dumps(data).encode()
@@ -122,6 +141,7 @@ class FixtureHandler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def path_reflect_data(self):
+        """Send the received request body, transforming chunked encoding"""
         data = b""
         if self.headers.get("Transfer-Encoding", "identity") != "identity":
             while True:
@@ -146,11 +166,13 @@ class FixtureHandler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(data)
 
     def path_forbidden(self):
+        """Send a 403 response"""
         self.send_response(403)
         self.send_header("Connection", "close")
         self.end_headers()
 
     def dispatch(self):
+        """Generic implementation for the do_* handler methods"""
         path = self.path[1:]
         handler = getattr(self, "path_" + path, None)
         if handler:
@@ -158,29 +180,44 @@ class FixtureHandler(http.server.BaseHTTPRequestHandler):
         else:
             self.send_error(404)
 
+    # pylint: disable=invalid-name
     def do_GET(self):
+        """Handle a test GET request"""
         self.dispatch()
 
+    # pylint: disable=invalid-name
     def do_PUT(self):
+        """Handle a test PUT request"""
         self.dispatch()
 
+    # pylint: disable=invalid-name
     def do_PATCH(self):
+        """Handle a test PATCH request"""
         self.dispatch()
 
+    # pylint: disable=invalid-name
     def do_POST(self):
+        """Handle a test POST request"""
         self.dispatch()
 
+    # pylint: disable=invalid-name
     def do_HEAD(self):
+        """Handle a test HEAD request"""
         self.dispatch()
 
+    # pylint: disable=invalid-name
     def do_OPTIONS(self):
+        """Handle a test OPTIONS request"""
         self.dispatch()
 
+    # pylint: disable=invalid-name
     def do_TRACE(self):
+        """Handle a test TRACE request"""
         self.dispatch()
 
 
 class BaseTest(unittest.TestCase):
+    """Base class with common utility functions"""
 
     def setUp(self):
         self.proxy = http.server.HTTPServer(("localhost", 0),
@@ -194,10 +231,17 @@ class BaseTest(unittest.TestCase):
         self.proxy.shutdown()
 
     def get_conn(self):
+        """Returns a HTTPConnection to the proxy"""
         host, port = self.proxy.socket.getsockname()
         return http.client.HTTPConnection(host, port=port)
 
     def check_header_sanity(self, headers):
+        """Checks response headers for sanity.
+
+        Args:
+            headers: A multi-valued dict (email.message.Message subclass) of
+                response headers
+        """
         counter = collections.Counter(headers.keys())
         duplicates = {
             name: value for name, value in counter.items() if value > 1
@@ -206,7 +250,9 @@ class BaseTest(unittest.TestCase):
 
 
 class HTTPProxyTest(BaseTest):
-    """Tests for tvaf.dal.create_schema()."""
+    """Tests for normal HTTP methods (not CONNECT)."""
+
+    # pylint: disable=too-many-public-methods
 
     def setUp(self):
         super().setUp()
@@ -226,6 +272,19 @@ class HTTPProxyTest(BaseTest):
                    headers=None,
                    message_body=None,
                    encode_chunked=False):
+        """Execute a proxied request to the test webserver.
+
+        Args:
+            method: The HTTP method string to use
+            path: The relative path on the test webserver
+            headers: A dict of headers to send
+            message_body: An iterable of bytes, or file-like, or bytes.
+            encode_chunked: Whether to write message_body using chunked
+                encoding.
+
+        Returns:
+            An HTTPConnection, with the given request already sent
+        """
         conn = self.get_conn()
         self.putrequest_proxy_to_httpd(conn, method, path)
         headers = dict(headers or {})
@@ -575,8 +634,18 @@ class HTTPProxyTest(BaseTest):
 
 
 class ConnectMethodTest(BaseTest):
+    """Tests for the CONNECT method"""
 
     def do_connect_obj(self, path, headers=None):
+        """Execute a proxied CONNECT request.
+
+        Args:
+            path: The CONNECT method target (normally host:port)
+            headers: A dict of headers to send
+
+        Returns:
+            An HTTPConnection with the given request already sent
+        """
         # http.client doesn't actually support bidirectional CONNECT streaming,
         # but it's nice for testing headers
         conn = self.get_conn()
@@ -592,10 +661,29 @@ class ConnectMethodTest(BaseTest):
         return conn
 
     def do_connect_obj_to_server(self, headers=None):
+        """Execute a proxied CONNECT request to the fixture server socket.
+
+        Args:
+            headers: A dict of headers to send
+
+        Returns:
+            An HTTPConnection with the given request already sent
+        """
         return self.do_connect_obj("%s:%d" % self.server.getsockname(),
                                    headers=headers)
 
     def make_connected_pair(self):
+        """Establish a proxied pair of connected sockets.
+
+        Executes a CONNECT request to the proxy, to the fixture server socket.
+        We will assert that the request was successful and the response was
+        valid, then return the sockets on either end of the connection.
+
+        Returns:
+            A tuple of socket objects; the first is the client connection to
+                the proxy, and the second is the server-side incoming
+                connection.
+        """
         proxy_address = self.proxy.socket.getsockname()
         c_to_s = socket.create_connection(proxy_address, 30)
         server_host, server_port = self.server.getsockname()

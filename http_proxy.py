@@ -3,6 +3,8 @@
 # The author disclaims copyright to this source code. Please see the
 # accompanying UNLICENSE file.
 
+"""A HTTP proxy module suitable for testing."""
+
 import argparse
 import base64
 import http.client
@@ -14,11 +16,18 @@ import urllib.parse
 
 
 class ChunkError(Exception):
-
-    pass
+    """Raised while processing chunked encoding, for invalid chunk sizes."""
 
 
 class _HTTPError(Exception):
+    """Raised internally to simplify processing.
+
+    Attributes:
+        code: The HTTP error code (4xx or 5xx) we should return.
+        message: The "reason"/"message" part we should return in the status
+            line.
+        explain: The full body of the error message, usually a traceback.
+    """
 
     def __init__(self, code, message=None, explain=None):
         super().__init__()
@@ -28,7 +37,23 @@ class _HTTPError(Exception):
 
 
 def read_to_end_of_chunks(file_like):
+    """Reads a chunked-encoded stream from a file-like object.
 
+    This will read up to the end of the chunked encoding, including chunk
+    delimeters, trailers, and the terminal empty line.
+
+    The stream will be returned as an iterator of bytes objects. The split
+    between bytes objects is arbitrary.
+
+    Args:
+        file_like: A file-like object with read() and readline() methods.
+
+    Yields:
+        bytes objects.
+
+    Raises:
+        ChunkError: if an invalid chunk size is encountered.
+    """
     def inner():
         while True:
             size_line = file_like.readline()
@@ -58,6 +83,20 @@ def read_to_end_of_chunks(file_like):
 
 
 def read_to_limit(file_like, limit, buffer_size):
+    """Reads a file-like object up to a number of bytes.
+
+    This will read up to the given number of bytes from the given file. The
+    stream will be returned as an iterator of bytes objects, having size up to
+    the given buffer_size.
+
+    Args:
+        file_like: A file-like object with a read() method.
+        limit: The total number of bytes to read.
+        buffer_size: Read data chunks of this size.
+
+    Yields:
+        bytes objects.
+    """
     offset = 0
     while offset < limit:
         amount = min(limit - offset, buffer_size)
@@ -69,6 +108,18 @@ def read_to_limit(file_like, limit, buffer_size):
 
 
 def read_all(file_like, buffer_size):
+    """Reads a file-like object to its end.
+
+    This will read an entire file. The stream will be returned as an iterator
+    of bytes objects, having size up to the given buffer_size.
+
+    Args:
+        file_like: A file-like object with a read() method.
+        buffer_size: Read data chunks of this size.
+
+    Yields:
+        bytes objects.
+    """
     while True:
         buf = file_like.read(buffer_size)
         if not buf:
@@ -77,16 +128,28 @@ def read_all(file_like, buffer_size):
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
+    """An HTTP proxy Handler class, for use with http.server classes.
 
+    Attributes:
+        timeout: Timeout value in seconds. Applies to upstream connections,
+            idle timeouts for CONNECT-method streams, and reading data from
+            both client and upstream.
+        basic_auth: If set, proxy will require basic authorization with this
+            credential.
+    """
+
+    # BaseHTTPRequestHandler tests this value
     protocol_version = "HTTP/1.1"
 
     BUFLEN = 8192
 
+    # This is really here to keep pylint happy
     close_connection = True
     timeout = 30
     basic_auth = None
 
     def authorize(self):
+        """Returns whether the request is authorized."""
         if not self.basic_auth:
             return True
 
@@ -100,6 +163,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
         return credentials == self.basic_auth
 
     def do_auth(self):
+        """Fail the request if unauthorized.
+
+        Should be called early from the do_* method handler method.
+
+        Returns:
+            False if the request was unauthorized and we sent an error
+                response, True otherwise.
+        """
         if self.authorize():
             return True
 
@@ -113,6 +184,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
         return False
 
     def connect_request(self):
+        """Connect to the upstream, for a CONNECT request.
+
+        Should be called from the do_CONNECT handler method.
+
+        Returns:
+            A socket connection to the upstream.
+
+        Raises:
+            _HTTPError: If the CONNECT target was invalid, or there was an
+                error connecting to the upstream.
+        """
         split = self.path.split(":")
         if len(split) != 2:
             raise _HTTPError(400, explain="Target must be host:port")
@@ -126,6 +208,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
             raise _HTTPError(502, explain=traceback.format_exc())
 
     def bidirectional_proxy(self, upstream):
+        """Forward data between the client and the given upstream.
+
+        Should be called from the do_CONNECT method handler.
+
+        Runs forever, until either upstream or client close their side of the
+        connection, or the idle timeout expires.
+
+        Args:
+            upstream: A socket connection to the upstream.
+        """
         socks = (upstream, self.request)
         while True:
             (rlist, _, xlist) = select.select(socks, (), socks, self.timeout)
@@ -144,6 +236,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     # pylint:disable=invalid-name
     def do_CONNECT(self):
+        """Handler for the CONNECT method.
+
+        Should be called from the superclass handler logic.
+        """
         upstream = None
         try:
             if not self.do_auth():
@@ -172,6 +268,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
         upstream.close()
 
     def proxy_request(self):
+        """Forward a normal HTTP request.
+
+        Should be called from the do_* handlers for normal HTTP requests (not
+        CONNECT).
+
+        Returns:
+            A tuple of (HTTPConnection, HTTPResponse).
+
+        Raises:
+            _HTTPError: If the request does not conform to HTTP/1.1
+                expectations.
+        """
         url = urllib.parse.urlsplit(self.path)
 
         if url.scheme != "http":
@@ -260,6 +368,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
                              explain=traceback.format_exc())
 
     def proxy_response(self, response):
+        """Forwards an upstream response back to the client.
+
+        Should be called from the do_* handlers for normal HTTP requests (not
+        CONNECT).
+
+        Args:
+            response: An HTTPResponse from upstream.
+        """
         # send_response supplies some headers unconditionally
         self.log_request(response.code)
         self.send_response_only(response.code, response.reason)
@@ -317,6 +433,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.wfile.write(chunk)
 
     def do_proxy(self):
+        """Handles proxying any normal HTTP request (not CONNECT).
+
+        This method is a generic implementation of the do_* handlers for normal
+        HTTP methods.
+        """
         upstream = None
         response = None
         try:
@@ -343,38 +464,47 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     # pylint:disable=invalid-name
     def do_GET(self):
+        """Handles a proxy GET request."""
         self.do_proxy()
 
     # pylint:disable=invalid-name
     def do_POST(self):
+        """Handles a proxy POST request."""
         self.do_proxy()
 
     # pylint:disable=invalid-name
     def do_PUT(self):
+        """Handles a proxy PUT request."""
         self.do_proxy()
 
     # pylint:disable=invalid-name
     def do_PATCH(self):
+        """Handles a proxy PATCH request."""
         self.do_proxy()
 
     # pylint:disable=invalid-name
     def do_HEAD(self):
+        """Handles a proxy HEAD request."""
         self.do_proxy()
 
     # pylint:disable=invalid-name
     def do_OPTIONS(self):
+        """Handles a proxy OPTIONS request."""
         self.do_proxy()
 
     # pylint:disable=invalid-name
     def do_DELETE(self):
+        """Handles a proxy DELETE request."""
         self.do_proxy()
 
     # pylint:disable=invalid-name
     def do_TRACE(self):
+        """Handles a proxy TRACE request."""
         self.do_proxy()
 
 
 def main():
+    """Command-line entry point for http_proxy."""
     parser = argparse.ArgumentParser("Simple HTTP proxy")
     parser.add_argument("--port", type=int, default=8080)
     parser.add_argument("--basic-auth")
