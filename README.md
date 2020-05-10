@@ -7,6 +7,7 @@ This is a python HTTP proxy. It was developed as a testing utility for [libtorre
 * single python file, suitable for direct execution
 * no third-party dependencies
 * suitable for testing http clients that may make calls through a proxy
+* compatible with the oldest currently-supported python3 (3.6 as of writing)
 
 ## non-goals
 

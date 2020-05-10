@@ -14,6 +14,7 @@ import http.client
 import http.server
 import select
 import socket
+import socketserver
 import traceback
 import urllib.parse
 
@@ -507,6 +508,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.do_proxy()
 
 
+class _ThreadingHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
+
+    daemon_threads = True
+
+
 class Main:
 
     def __init__(self):
@@ -518,6 +524,7 @@ class Main:
 
         self.args = None
         self.server = None
+        self.address = None
 
     def run(self):
         """Command-line entry point for http_proxy."""
@@ -531,7 +538,7 @@ class Main:
         else:
             Handler.basic_auth = None
 
-        self.server = http.server.ThreadingHTTPServer(self.address, Handler)
+        self.server = _ThreadingHTTPServer(self.address, Handler)
         self.server.serve_forever()
 
     def shutdown(self):
