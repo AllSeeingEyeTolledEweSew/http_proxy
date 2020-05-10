@@ -1,14 +1,16 @@
 # The author disclaims copyright to this source code. Please see the
 # accompanying UNLICENSE file.
-
 """Tests for http_proxy."""
 
+import base64
 import collections
+import contextlib
 import http.client
 import http.server
 import json
 import socket
 import threading
+import time
 import unittest
 import unittest.mock
 import urllib.parse
@@ -225,15 +227,21 @@ class BaseTest(unittest.TestCase):
         self.proxy_thread = threading.Thread(name="proxy",
                                              target=self.proxy.serve_forever,
                                              daemon=True)
-        self.proxy_thread.start()
-
-    def tearDown(self):
-        self.proxy.shutdown()
+        self.httpd = http.server.HTTPServer(("localhost", 0), FixtureHandler)
+        self.httpd_thread = threading.Thread(name="httpd",
+                                             target=self.httpd.serve_forever,
+                                             daemon=True)
 
     def get_conn(self):
         """Returns a HTTPConnection to the proxy"""
         host, port = self.proxy.socket.getsockname()
         return http.client.HTTPConnection(host, port=port)
+
+    def putrequest_proxy_to_httpd(self, conn, method, path):
+        host, port = self.httpd.socket.getsockname()
+        url = urllib.parse.urlunsplit(
+            ("http", "%s:%d" % (host, port), path, None, None))
+        conn.putrequest(method, url)
 
     def check_header_sanity(self, headers):
         """Checks response headers for sanity.
@@ -256,14 +264,12 @@ class HTTPProxyTest(BaseTest):
 
     def setUp(self):
         super().setUp()
-        self.httpd = http.server.HTTPServer(("localhost", 0), FixtureHandler)
-        self.httpd_thread = threading.Thread(name="httpd",
-                                             target=self.httpd.serve_forever,
-                                             daemon=True)
+        self.proxy_thread.start()
         self.httpd_thread.start()
 
     def tearDown(self):
         super().tearDown()
+        self.proxy.shutdown()
         self.httpd.shutdown()
 
     def do_request(self,
@@ -297,12 +303,6 @@ class HTTPProxyTest(BaseTest):
         conn.endheaders(message_body=message_body,
                         encode_chunked=encode_chunked)
         return conn
-
-    def putrequest_proxy_to_httpd(self, conn, method, path):
-        host, port = self.httpd.socket.getsockname()
-        url = urllib.parse.urlunsplit(
-            ("http", "%s:%d" % (host, port), path, None, None))
-        conn.putrequest(method, url)
 
     def test_get_bad_status_line(self):
         response = self.do_request("GET", "/bad_status_line").getresponse()
@@ -445,6 +445,12 @@ class HTTPProxyTest(BaseTest):
             headers = {"Proxy-Authorization": "Basic wrong"}
             response = self.do_request("GET", "/data",
                                        headers=headers).getresponse()
+            self.assertEqual(response.status, 407)
+            self.check_header_sanity(response.headers)
+
+    def test_basic_auth_absent(self):
+        with unittest.mock.patch("http_proxy.Handler.basic_auth", "secret"):
+            response = self.do_request("GET", "/data").getresponse()
             self.assertEqual(response.status, 407)
             self.check_header_sanity(response.headers)
 
@@ -707,9 +713,15 @@ class ConnectMethodTest(BaseTest):
 
     def setUp(self):
         super().setUp()
+        self.proxy_thread.start()
         self.server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.server.bind(("localhost", 0))
         self.server.listen()
+
+    def tearDown(self):
+        super().tearDown()
+        self.proxy.shutdown()
+        self.server.close()
 
     def test_basic_auth(self):
         with unittest.mock.patch("http_proxy.Handler.basic_auth", "secret"):
@@ -805,3 +817,74 @@ class ConnectMethodTest(BaseTest):
         c_to_s.close()
         c_rfile.close()
         self.assertEqual(s_rfile.read(), b"goodbye")
+
+
+class MainTest(BaseTest):
+
+    def setUp(self):
+        super().setUp()
+        self.httpd_thread.start()
+        self.main = http_proxy.Main()
+        self.main_thread = threading.Thread(name="main",
+                                            target=self.main.run,
+                                            daemon=True)
+
+    def tearDown(self):
+        super().tearDown()
+        self.httpd.shutdown()
+        self.main.shutdown()
+
+    def get_unused_address(self):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.bind(("localhost", 0))
+            return sock.getsockname()
+
+    @contextlib.contextmanager
+    def start_and_connect(self, *args):
+        host, port = self.get_unused_address()
+        argv = ["http_proxy", "--bind-host", host, "--port", str(port)]
+        argv += args
+        with unittest.mock.patch("sys.argv", argv):
+            self.main_thread.start()
+            deadline = time.time() + 5
+            while True:
+                try:
+                    sock = socket.create_connection((host, port))
+                    sock.close()
+                    break
+                except OSError:
+                    pass
+                self.assertLess(time.time(), deadline, msg="startup timed out")
+                time.sleep(0.1)
+            yield http.client.HTTPConnection(host, port=port)
+
+    def test_normal_startup(self):
+        with self.start_and_connect() as conn:
+            self.putrequest_proxy_to_httpd(conn, "GET", "/empty")
+            conn.endheaders()
+            response = conn.getresponse()
+            self.assertEqual(response.status, 200)
+            self.check_header_sanity(response.headers)
+            self.assertEqual(response.getheader("Content-Length"), "0")
+            self.assertEqual(response.read(), b"")
+
+    def test_auth_fail(self):
+        with self.start_and_connect("--basic-auth", "test:test") as conn:
+            self.putrequest_proxy_to_httpd(conn, "GET", "/empty")
+            conn.endheaders()
+            response = conn.getresponse()
+            self.assertEqual(response.status, 407)
+            self.check_header_sanity(response.headers)
+
+    def test_auth_pass(self):
+        with self.start_and_connect("--basic-auth", "test:test") as conn:
+            self.putrequest_proxy_to_httpd(conn, "GET", "/empty")
+            conn.putheader(
+                "Proxy-Authorization",
+                "Basic %s" % base64.b64encode("test:test".encode()).decode())
+            conn.endheaders()
+            response = conn.getresponse()
+            self.assertEqual(response.status, 200)
+            self.check_header_sanity(response.headers)
+            self.assertEqual(response.getheader("Content-Length"), "0")
+            self.assertEqual(response.read(), b"")

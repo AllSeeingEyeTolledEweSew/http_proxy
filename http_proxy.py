@@ -2,7 +2,6 @@
 
 # The author disclaims copyright to this source code. Please see the
 # accompanying UNLICENSE file.
-
 """A HTTP proxy module suitable for testing."""
 
 import argparse
@@ -54,6 +53,7 @@ def read_to_end_of_chunks(file_like):
     Raises:
         ChunkError: if an invalid chunk size is encountered.
     """
+
     def inner():
         while True:
             size_line = file_like.readline()
@@ -153,7 +153,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if not self.basic_auth:
             return True
 
-        header = self.headers.get("Proxy-Authorization")
+        header = self.headers.get("Proxy-Authorization", "")
         split = header.split(None, 1)
         if len(split) != 2:
             return False
@@ -503,23 +503,37 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.do_proxy()
 
 
-def main():
-    """Command-line entry point for http_proxy."""
-    parser = argparse.ArgumentParser("Simple HTTP proxy")
-    parser.add_argument("--port", type=int, default=8080)
-    parser.add_argument("--basic-auth")
-    parser.add_argument("--timeout", type=int, default=30)
-    parser.add_argument("--bind-host", default="localhost")
+class Main:
 
-    args = parser.parse_args()
+    def __init__(self):
+        self.parser = argparse.ArgumentParser("Simple HTTP proxy")
+        self.parser.add_argument("--port", type=int, default=8080)
+        self.parser.add_argument("--basic-auth")
+        self.parser.add_argument("--timeout", type=int, default=30)
+        self.parser.add_argument("--bind-host", default="localhost")
 
-    address = (args.bind_host, args.port)
+        self.args = None
+        self.server = None
 
-    if args.basic_auth:
-        Handler.basic_auth = base64.b64encode(args.basic_auth.encode()).decode()
+    def run(self):
+        """Command-line entry point for http_proxy."""
+        self.args = self.parser.parse_args()
 
-    http.server.ThreadingHTTPServer(address, Handler)
+        self.address = (self.args.bind_host, self.args.port)
+
+        if self.args.basic_auth:
+            Handler.basic_auth = base64.b64encode(
+                self.args.basic_auth.encode()).decode()
+        else:
+            Handler.basic_auth = None
+
+        self.server = http.server.ThreadingHTTPServer(self.address, Handler)
+        self.server.serve_forever()
+
+    def shutdown(self):
+        if self.server is not None:
+            self.server.shutdown()
 
 
 if __name__ == "__main__":
-    main()
+    Main().run()
