@@ -2,7 +2,11 @@
 
 # The author disclaims copyright to this source code. Please see the
 # accompanying UNLICENSE file.
-"""A HTTP proxy module suitable for testing."""
+"""A HTTP proxy module suitable for testing.
+
+See http://github.com/AllSeeingEyeTolledEweSew/http_proxy for more information
+about this project.
+"""
 
 import argparse
 import base64
