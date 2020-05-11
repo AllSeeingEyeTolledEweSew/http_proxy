@@ -253,7 +253,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             upstream = self.connect_request()
         except _HTTPError as err:
             self.send_error(err.code, message=err.message, explain=err.explain)
-        except:  # pylint:disable=bare-except
+        except Exception:
             self.log_error("%s", traceback.format_exc())
             self.send_error(500, explain=traceback.format_exc())
 
@@ -266,7 +266,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         try:
             self.bidirectional_proxy(upstream)
-        except:  # pylint:disable=bare-except
+        except Exception:
             self.log_error("%s", traceback.format_exc())
             self.close_connection = True
 
@@ -452,7 +452,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             upstream, response = self.proxy_request()
         except _HTTPError as exc:
             self.send_error(exc.code, message=exc.message, explain=exc.explain)
-        except:  # pylint:disable=bare-except
+        except Exception:
             self.log_error("%s", traceback.format_exc())
             self.send_error(500, explain=traceback.format_exc())
 
@@ -461,7 +461,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         try:
             self.proxy_response(response)
-        except:  # pylint:disable=bare-except
+        except Exception:
             self.log_error("%s", traceback.format_exc())
             self.close_connection = True
 
