@@ -191,8 +191,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return True
 
         # send_error doesn't let us send headers, so do it by hand
-        self.log_error("code %d, message %s", 407,
-                       "Proxy authorization required")
+        self.log_error("code %d, message %s", 407, "Proxy authorization required")
         self.send_response(407, "Proxy authorization required")
         self.send_header("Connection", "close")
         self.send_header("Proxy-Authenticate", "Basic")
@@ -319,22 +318,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
             raise _HTTPError(411)
 
         try:
-            upstream = http.client.HTTPConnection(url.netloc,
-                                                  timeout=self.timeout)
+            upstream = http.client.HTTPConnection(url.netloc, timeout=self.timeout)
         except http.client.InvalidURL as exc:
-            raise _HTTPError(400,
-                             message=str(exc),
-                             explain=traceback.format_exc())
+            raise _HTTPError(400, message=str(exc), explain=traceback.format_exc())
 
         path = urllib.parse.urlunsplit(("", "", url.path, url.query, ""))
-        upstream.putrequest(self.command,
-                            path,
-                            skip_host=True,
-                            skip_accept_encoding=True)
+        upstream.putrequest(
+            self.command, path, skip_host=True, skip_accept_encoding=True
+        )
 
         connection_tokens = []
-        filter_headers = set(
-            ("proxy-authorization", "connection", "keep-alive"))
+        filter_headers = set(("proxy-authorization", "connection", "keep-alive"))
         pass_headers = set(("transfer-encoding", "te", "trailer"))
         if "Connection" in self.headers:
             request_connection_tokens = [
@@ -379,9 +373,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             raise _HTTPError(502, explain=traceback.format_exc())
         except ChunkError as exc:
             upstream.close()
-            raise _HTTPError(400,
-                             message=str(exc),
-                             explain=traceback.format_exc())
+            raise _HTTPError(400, message=str(exc), explain=traceback.format_exc())
 
     def proxy_response(self, response):
         """Forwards an upstream response back to the client.
@@ -397,13 +389,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_response_only(response.code, response.reason)
 
         connection_tokens = []
-        filter_headers = set(
-            ("proxy-authorization", "connection", "keep-alive"))
+        filter_headers = set(("proxy-authorization", "connection", "keep-alive"))
         pass_headers = set(("transfer-encoding", "te", "trailer"))
         if response.getheader("Connection"):
             response_connection_tokens = [
-                token.strip()
-                for token in response.getheader("Connection").split(",")
+                token.strip() for token in response.getheader("Connection").split(",")
             ]
         else:
             response_connection_tokens = []
@@ -525,7 +515,6 @@ class _ThreadingHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
 
 
 class Main:
-
     def __init__(self):
         self.parser = argparse.ArgumentParser("Simple HTTP proxy")
         self.parser.add_argument("--port", type=int, default=8080)
@@ -545,7 +534,8 @@ class Main:
 
         if self.args.basic_auth:
             Handler.basic_auth = base64.b64encode(
-                self.args.basic_auth.encode()).decode()
+                self.args.basic_auth.encode()
+            ).decode()
         else:
             Handler.basic_auth = None
 
