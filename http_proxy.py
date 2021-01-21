@@ -27,6 +27,11 @@ import select
 import socket
 import socketserver
 import traceback
+from typing import BinaryIO
+from typing import Iterable
+from typing import Iterator
+from typing import Optional
+from typing import Tuple
 import urllib.parse
 
 
@@ -44,14 +49,14 @@ class _HTTPError(Exception):
         explain: The full body of the error message, usually a traceback.
     """
 
-    def __init__(self, code, message=None, explain=None):
+    def __init__(self, code: int, message: str = None, explain: str = None):
         super().__init__()
         self.code = code
         self.message = message
         self.explain = explain
 
 
-def read_to_end_of_chunks(file_like):
+def read_to_end_of_chunks(file_like: BinaryIO) -> Iterator[bytes]:
     """Reads a chunked-encoded stream from a file-like object.
 
     This will read up to the end of the chunked encoding, including chunk
@@ -70,7 +75,7 @@ def read_to_end_of_chunks(file_like):
         ChunkError: if an invalid chunk size is encountered.
     """
 
-    def inner():
+    def inner() -> Iterator[bytes]:
         while True:
             size_line = file_like.readline()
             yield size_line
@@ -98,7 +103,9 @@ def read_to_end_of_chunks(file_like):
         yield chunk
 
 
-def read_to_limit(file_like, limit, buffer_size):
+def read_to_limit(
+    file_like: BinaryIO, limit: int, buffer_size: int
+) -> Iterator[bytes]:
     """Reads a file-like object up to a number of bytes.
 
     This will read up to the given number of bytes from the given file. The
@@ -123,7 +130,7 @@ def read_to_limit(file_like, limit, buffer_size):
         offset += len(buf)
 
 
-def read_all(file_like, buffer_size):
+def read_all(file_like: BinaryIO, buffer_size: int) -> Iterator[bytes]:
     """Reads a file-like object to its end.
 
     This will read an entire file. The stream will be returned as an iterator
@@ -159,12 +166,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     BUFLEN = 8192
 
-    # This is really here to keep pylint happy
-    close_connection = True
     timeout = 30
-    basic_auth = None
+    basic_auth: Optional[str] = None
 
-    def authorize(self):
+    def authorize(self) -> bool:
         """Returns whether the request is authorized."""
         if not self.basic_auth:
             return True
@@ -178,7 +183,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return False
         return credentials == self.basic_auth
 
-    def do_auth(self):
+    def do_auth(self) -> bool:
         """Fail the request if unauthorized.
 
         Should be called early from the do_* method handler method.
@@ -200,7 +205,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         return False
 
-    def connect_request(self):
+    def connect_request(self) -> socket.socket:
         """Connect to the upstream, for a CONNECT request.
 
         Should be called from the do_CONNECT handler method.
@@ -215,7 +220,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
         split = self.path.split(":")
         if len(split) != 2:
             raise _HTTPError(400, explain="Target must be host:port")
-        host, port = split
+        host, port_str = split
+        try:
+            port = int(port_str)
+        except ValueError:
+            raise _HTTPError(400, explain="Target must be host:port")
 
         try:
             return socket.create_connection((host, port), self.timeout)
@@ -224,7 +233,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         except OSError:
             raise _HTTPError(502, explain=traceback.format_exc())
 
-    def bidirectional_proxy(self, upstream):
+    def bidirectional_proxy(self, upstream: socket.socket) -> None:
         """Forward data between the client and the given upstream.
 
         Should be called from the do_CONNECT method handler.
@@ -252,7 +261,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     upstream.sendall(data)
 
     # pylint:disable=invalid-name
-    def do_CONNECT(self):
+    def do_CONNECT(self) -> None:
         """Handler for the CONNECT method.
 
         Should be called from the superclass handler logic.
@@ -284,7 +293,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         upstream.close()
 
-    def proxy_request(self):
+    def proxy_request(
+        self,
+    ) -> Tuple[http.client.HTTPConnection, http.client.HTTPResponse]:
         """Forward a normal HTTP request.
 
         Should be called from the do_* handlers for normal HTTP requests (not
@@ -302,6 +313,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if url.scheme != "http":
             raise _HTTPError(400, message="Target scheme is not http")
 
+        message_body: Optional[Iterable[bytes]]
         # We need to read only the expected amount from the client
         # https://www.w3.org/Protocols/rfc2616/rfc2616-sec4.html#sec4.4
         if self.headers.get("Transfer-Encoding", "identity") != "identity":
@@ -386,7 +398,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 400, message=str(exc), explain=traceback.format_exc()
             )
 
-    def proxy_response(self, response):
+    def proxy_response(self, response: http.client.HTTPResponse) -> None:
         """Forwards an upstream response back to the client.
 
         Should be called from the do_* handlers for normal HTTP requests (not
@@ -396,8 +408,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             response: An HTTPResponse from upstream.
         """
         # send_response supplies some headers unconditionally
-        self.log_request(response.code)
-        self.send_response_only(response.code, response.reason)
+        self.log_request(response.status)
+        self.send_response_only(response.status, response.reason)
 
         connection_tokens = []
         filter_headers = set(
@@ -407,7 +419,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if response.getheader("Connection"):
             response_connection_tokens = [
                 token.strip()
-                for token in response.getheader("Connection").split(",")
+                for token in response.getheader("Connection", "").split(",")
             ]
         else:
             response_connection_tokens = []
@@ -433,14 +445,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
         # HTTPResponse.read() will decode chunks, but we want to pass them
         # through. Use this "hack" to pass through the encoding, and just use
         # our own reader. Field is undocumented, but public.
-        response.chunked = False
+        response.chunked = False  # type: ignore
 
         # https://www.w3.org/Protocols/rfc2616/rfc2616-sec4.html#sec4.4
         if response.getheader("Transfer-Encoding", "identity") != "identity":
             body = read_to_end_of_chunks(response)
         elif response.getheader("Content-Length"):
             try:
-                length = int(response.getheader("Content-Length"))
+                length = int(response.getheader("Content-Length", ""))
             except ValueError:
                 body = read_all(response, self.BUFLEN)
             else:
@@ -452,7 +464,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         for chunk in body:
             self.wfile.write(chunk)
 
-    def do_proxy(self):
+    def do_proxy(self) -> None:
         """Handles proxying any normal HTTP request (not CONNECT).
 
         This method is a generic implementation of the do_* handlers for normal
@@ -471,7 +483,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.log_error("%s", traceback.format_exc())
             self.send_error(500, explain=traceback.format_exc())
 
-        if not response:
+        if response is None or upstream is None:
             return
 
         try:
@@ -483,42 +495,42 @@ class Handler(http.server.BaseHTTPRequestHandler):
         upstream.close()
 
     # pylint:disable=invalid-name
-    def do_GET(self):
+    def do_GET(self) -> None:
         """Handles a proxy GET request."""
         self.do_proxy()
 
     # pylint:disable=invalid-name
-    def do_POST(self):
+    def do_POST(self) -> None:
         """Handles a proxy POST request."""
         self.do_proxy()
 
     # pylint:disable=invalid-name
-    def do_PUT(self):
+    def do_PUT(self) -> None:
         """Handles a proxy PUT request."""
         self.do_proxy()
 
     # pylint:disable=invalid-name
-    def do_PATCH(self):
+    def do_PATCH(self) -> None:
         """Handles a proxy PATCH request."""
         self.do_proxy()
 
     # pylint:disable=invalid-name
-    def do_HEAD(self):
+    def do_HEAD(self) -> None:
         """Handles a proxy HEAD request."""
         self.do_proxy()
 
     # pylint:disable=invalid-name
-    def do_OPTIONS(self):
+    def do_OPTIONS(self) -> None:
         """Handles a proxy OPTIONS request."""
         self.do_proxy()
 
     # pylint:disable=invalid-name
-    def do_DELETE(self):
+    def do_DELETE(self) -> None:
         """Handles a proxy DELETE request."""
         self.do_proxy()
 
     # pylint:disable=invalid-name
-    def do_TRACE(self):
+    def do_TRACE(self) -> None:
         """Handles a proxy TRACE request."""
         self.do_proxy()
 
@@ -531,34 +543,32 @@ class _ThreadingHTTPServer(
 
 
 class Main:
-    def __init__(self):
+    def __init__(self) -> None:
         self.parser = argparse.ArgumentParser("Simple HTTP proxy")
         self.parser.add_argument("--port", type=int, default=8080)
         self.parser.add_argument("--basic-auth")
         self.parser.add_argument("--timeout", type=int, default=30)
         self.parser.add_argument("--bind-host", default="localhost")
 
-        self.args = None
-        self.server = None
-        self.address = None
+        self.server: Optional[_ThreadingHTTPServer] = None
 
-    def run(self):
+    def run(self) -> None:
         """Command-line entry point for http_proxy."""
-        self.args = self.parser.parse_args()
+        args = self.parser.parse_args()
 
-        self.address = (self.args.bind_host, self.args.port)
+        address = (args.bind_host, args.port)
 
-        if self.args.basic_auth:
+        if args.basic_auth:
             Handler.basic_auth = base64.b64encode(
-                self.args.basic_auth.encode()
+                args.basic_auth.encode()
             ).decode()
         else:
             Handler.basic_auth = None
 
-        self.server = _ThreadingHTTPServer(self.address, Handler)
+        self.server = _ThreadingHTTPServer(address, Handler)
         self.server.serve_forever()
 
-    def shutdown(self):
+    def shutdown(self) -> None:
         if self.server is not None:
             self.server.shutdown()
 

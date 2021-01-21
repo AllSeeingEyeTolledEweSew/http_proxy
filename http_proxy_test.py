@@ -5,12 +5,20 @@
 import base64
 import collections
 import contextlib
+import email.message
 import http.client
 import http.server
 import json
 import socket
 import threading
 import time
+from typing import BinaryIO
+from typing import cast
+from typing import Dict
+from typing import Iterable
+from typing import Iterator
+from typing import Tuple
+from typing import Union
 import unittest
 import unittest.mock
 import urllib.parse
@@ -22,10 +30,15 @@ CHUNK = 1013
 DATA = bytes(i % 256 for i in range(LEN))
 
 
-def get_chunks():
+def get_chunks() -> Iterator[bytes]:
     """Yields fixture data in arbitrary-sized chunks."""
     for i in range(0, LEN, CHUNK):
         yield DATA[i : i + CHUNK]
+
+
+def parse_headers(fp: BinaryIO) -> http.client.HTTPMessage:
+    # mypy 0.790's typeshed is missing this function
+    return http.client.parse_headers(fp)  # type: ignore
 
 
 class FixtureHandler(http.server.BaseHTTPRequestHandler):
@@ -33,31 +46,31 @@ class FixtureHandler(http.server.BaseHTTPRequestHandler):
 
     # pylint: disable=too-many-public-methods
 
-    def path_empty(self):
+    def path_empty(self) -> None:
         """Send an empty response with Content-Length: 0"""
         self.send_response(200)
         self.send_header("Connection", "close")
         self.send_header("Content-Length", "0")
         self.end_headers()
 
-    def path_empty_no_length(self):
+    def path_empty_no_length(self) -> None:
         """Send an empty response with no Content-Length"""
         self.send_response(200)
         self.send_header("Connection", "close")
         self.end_headers()
 
-    def path_empty_with_hop_by_hop(self):
+    def path_empty_with_hop_by_hop(self) -> None:
         """Send an empty response with a nonstandard hop-by-hop header"""
         self.send_response(200)
         self.send_header("Connection", "close, X-Magic")
         self.send_header("X-Magic", "abcd1234")
         self.end_headers()
 
-    def path_bad_status_line(self):
+    def path_bad_status_line(self) -> None:
         """Send a bad HTTP response status line"""
         self.wfile.write(b"HTTP/1.1 whoopsie\r\n")
 
-    def path_data(self):
+    def path_data(self) -> None:
         """Send some data with Content-Length"""
         self.send_response(200)
         self.send_header("Connection", "close")
@@ -65,7 +78,7 @@ class FixtureHandler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(DATA)
 
-    def path_data_short(self):
+    def path_data_short(self) -> None:
         """Send some data, truncated according to its Content-Length"""
         self.send_response(200)
         self.send_header("Connection", "close")
@@ -73,14 +86,14 @@ class FixtureHandler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(DATA[: LEN // 2])
 
-    def path_data_no_length(self):
+    def path_data_no_length(self) -> None:
         """Send some data with no Content-Length"""
         self.send_response(200)
         self.send_header("Connection", "close")
         self.end_headers()
         self.wfile.write(DATA)
 
-    def path_data_with_invalid_length(self):
+    def path_data_with_invalid_length(self) -> None:
         """Send some data with a garbage Content-Length"""
         self.send_response(200)
         self.send_header("Connection", "close")
@@ -88,7 +101,7 @@ class FixtureHandler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(DATA)
 
-    def path_data_chunked(self):
+    def path_data_chunked(self) -> None:
         """Send some data using chunked encoding"""
         self.send_response(200)
         self.send_header("Connection", "close, Transfer-Encoding")
@@ -100,7 +113,7 @@ class FixtureHandler(http.server.BaseHTTPRequestHandler):
             self.wfile.write(b"\r\n")
         self.wfile.write(b"0\r\n\r\n")
 
-    def path_data_chunked_invalid(self):
+    def path_data_chunked_invalid(self) -> None:
         """Send some chunked encoding with an invalid chunk size"""
         self.send_response(200)
         self.send_header("Connection", "close, Transfer-Encoding")
@@ -108,7 +121,7 @@ class FixtureHandler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(b"whoopsie\r\n")
 
-    def path_data_chunked_short(self):
+    def path_data_chunked_short(self) -> None:
         """Send some truncated chunked encoding"""
         self.send_response(200)
         self.send_header("Connection", "close, Transfer-Encoding")
@@ -116,7 +129,7 @@ class FixtureHandler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(b"123\r\n")
 
-    def path_trailers(self):
+    def path_trailers(self) -> None:
         """Send some data using chunked encoding with HTTP trailers"""
         self.send_response(200)
         self.send_header("Connection", "close, Transfer-Encoding")
@@ -131,19 +144,19 @@ class FixtureHandler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(b"Checksum: abc123\r\n")
         self.wfile.write(b"\r\n")
 
-    def path_reflect_headers(self):
+    def path_reflect_headers(self) -> None:
         """Send the received headers and status line as JSON"""
-        data = dict(
+        data_dict = dict(
             requestline=self.requestline, headers=dict(self.headers.items())
         )
-        data = json.dumps(data).encode()
+        data = json.dumps(data_dict).encode()
         self.send_response(200)
         self.send_header("Connection", "close")
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)
 
-    def path_reflect_data(self):
+    def path_reflect_data(self) -> None:
         """Send the received request body, transforming chunked encoding"""
         data = b""
         if self.headers.get("Transfer-Encoding", "identity") != "identity":
@@ -168,13 +181,13 @@ class FixtureHandler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
-    def path_forbidden(self):
+    def path_forbidden(self) -> None:
         """Send a 403 response"""
         self.send_response(403)
         self.send_header("Connection", "close")
         self.end_headers()
 
-    def dispatch(self):
+    def dispatch(self) -> None:
         """Generic implementation for the do_* handler methods"""
         path = self.path[1:]
         handler = getattr(self, "path_" + path, None)
@@ -184,37 +197,37 @@ class FixtureHandler(http.server.BaseHTTPRequestHandler):
             self.send_error(404)
 
     # pylint: disable=invalid-name
-    def do_GET(self):
+    def do_GET(self) -> None:
         """Handle a test GET request"""
         self.dispatch()
 
     # pylint: disable=invalid-name
-    def do_PUT(self):
+    def do_PUT(self) -> None:
         """Handle a test PUT request"""
         self.dispatch()
 
     # pylint: disable=invalid-name
-    def do_PATCH(self):
+    def do_PATCH(self) -> None:
         """Handle a test PATCH request"""
         self.dispatch()
 
     # pylint: disable=invalid-name
-    def do_POST(self):
+    def do_POST(self) -> None:
         """Handle a test POST request"""
         self.dispatch()
 
     # pylint: disable=invalid-name
-    def do_HEAD(self):
+    def do_HEAD(self) -> None:
         """Handle a test HEAD request"""
         self.dispatch()
 
     # pylint: disable=invalid-name
-    def do_OPTIONS(self):
+    def do_OPTIONS(self) -> None:
         """Handle a test OPTIONS request"""
         self.dispatch()
 
     # pylint: disable=invalid-name
-    def do_TRACE(self):
+    def do_TRACE(self) -> None:
         """Handle a test TRACE request"""
         self.dispatch()
 
@@ -222,7 +235,7 @@ class FixtureHandler(http.server.BaseHTTPRequestHandler):
 class BaseTest(unittest.TestCase):
     """Base class with common utility functions"""
 
-    def setUp(self):
+    def setUp(self) -> None:
         self.proxy = http.server.HTTPServer(
             ("localhost", 0), http_proxy.Handler
         )
@@ -234,19 +247,21 @@ class BaseTest(unittest.TestCase):
             name="httpd", target=self.httpd.serve_forever, daemon=True
         )
 
-    def get_conn(self):
+    def get_conn(self) -> http.client.HTTPConnection:
         """Returns a HTTPConnection to the proxy"""
         host, port = self.proxy.socket.getsockname()
         return http.client.HTTPConnection(host, port=port)
 
-    def putrequest_proxy_to_httpd(self, conn, method, path):
+    def putrequest_proxy_to_httpd(
+        self, conn: http.client.HTTPConnection, method: str, path: str
+    ) -> None:
         host, port = self.httpd.socket.getsockname()
         url = urllib.parse.urlunsplit(
             ("http", "%s:%d" % (host, port), path, None, None)
         )
         conn.putrequest(method, url)
 
-    def check_header_sanity(self, headers):
+    def check_header_sanity(self, headers: email.message.Message) -> None:
         """Checks response headers for sanity.
 
         Args:
@@ -265,24 +280,24 @@ class HTTPProxyTest(BaseTest):
 
     # pylint: disable=too-many-public-methods
 
-    def setUp(self):
+    def setUp(self) -> None:
         super().setUp()
         self.proxy_thread.start()
         self.httpd_thread.start()
 
-    def tearDown(self):
+    def tearDown(self) -> None:
         super().tearDown()
         self.proxy.shutdown()
         self.httpd.shutdown()
 
     def do_request(
         self,
-        method,
-        path,
-        headers=None,
-        message_body=None,
-        encode_chunked=False,
-    ):
+        method: str,
+        path: str,
+        headers: Dict[str, str] = None,
+        message_body: Union[bytes, Iterable[bytes], BinaryIO] = None,
+        encode_chunked: bool = False,
+    ) -> http.client.HTTPConnection:
         """Execute a proxied request to the test webserver.
 
         Args:
@@ -310,17 +325,17 @@ class HTTPProxyTest(BaseTest):
         )
         return conn
 
-    def test_get_bad_status_line(self):
+    def test_get_bad_status_line(self) -> None:
         response = self.do_request("GET", "/bad_status_line").getresponse()
         self.assertEqual(response.status, 502)
         self.check_header_sanity(response.headers)
 
-    def test_get_forbidden(self):
+    def test_get_forbidden(self) -> None:
         response = self.do_request("GET", "/forbidden").getresponse()
         self.assertEqual(response.status, 403)
         self.check_header_sanity(response.headers)
 
-    def test_nonexistent_gateway(self):
+    def test_nonexistent_gateway(self) -> None:
         conn = self.get_conn()
         conn.putrequest("GET", "http://does-not-exist/")
         conn.endheaders()
@@ -328,7 +343,7 @@ class HTTPProxyTest(BaseTest):
         self.assertEqual(response.status, 502)
         self.check_header_sanity(response.headers)
 
-    def test_gateway_timeout(self):
+    def test_gateway_timeout(self) -> None:
         # Create a listening socket that sends nothing
         server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         server.settimeout(10)
@@ -347,7 +362,7 @@ class HTTPProxyTest(BaseTest):
             self.assertEqual(response.status, 504)
             self.check_header_sanity(response.headers)
 
-    def test_non_http_url(self):
+    def test_non_http_url(self) -> None:
         conn = self.get_conn()
         conn.putrequest("GET", "https://example.com/")
         conn.endheaders()
@@ -355,7 +370,7 @@ class HTTPProxyTest(BaseTest):
         self.assertEqual(response.status, 400)
         self.check_header_sanity(response.headers)
 
-    def test_invalid_http_url(self):
+    def test_invalid_http_url(self) -> None:
         conn = self.get_conn()
         conn.putrequest("GET", "http://example.com:whoopsie/")
         conn.endheaders()
@@ -363,36 +378,37 @@ class HTTPProxyTest(BaseTest):
         self.assertEqual(response.status, 400)
         self.check_header_sanity(response.headers)
 
-    def test_get_empty(self):
+    def test_get_empty(self) -> None:
         response = self.do_request("GET", "/empty").getresponse()
         self.assertEqual(response.status, 200)
         self.check_header_sanity(response.headers)
         self.assertEqual(response.getheader("Content-Length"), "0")
         self.assertEqual(response.read(), b"")
 
-    def test_get_empty_no_length(self):
+    def test_get_empty_no_length(self) -> None:
         response = self.do_request("GET", "/empty_no_length").getresponse()
         self.assertEqual(response.status, 200)
         self.check_header_sanity(response.headers)
         self.assertEqual(response.getheader("Content-Length"), None)
         self.assertEqual(response.read(), b"")
 
-    def test_get_empty_with_hop_by_hop(self):
+    def test_get_empty_with_hop_by_hop(self) -> None:
         response = self.do_request(
             "GET", "/empty_with_hop_by_hop"
         ).getresponse()
         self.assertEqual(response.status, 200)
         self.check_header_sanity(response.headers)
-        self.assertNotIn("X-Magic", response.headers)
+        # HTTPMessage not a Container in mypy 0.790
+        self.assertNotIn("X-Magic", response.headers)  # type: ignore
 
-    def test_get_data(self):
+    def test_get_data(self) -> None:
         response = self.do_request("GET", "/data").getresponse()
         self.assertEqual(response.status, 200)
         self.check_header_sanity(response.headers)
         self.assertEqual(response.getheader("Content-Length"), str(LEN))
         self.assertEqual(response.read(), DATA)
 
-    def test_get_data_with_invalid_length(self):
+    def test_get_data_with_invalid_length(self) -> None:
         response = self.do_request(
             "GET", "/data_with_invalid_length"
         ).getresponse()
@@ -400,7 +416,7 @@ class HTTPProxyTest(BaseTest):
         self.check_header_sanity(response.headers)
         self.assertEqual(response.read(), DATA)
 
-    def test_get_data_short(self):
+    def test_get_data_short(self) -> None:
         response = self.do_request("GET", "/data_short").getresponse()
         self.assertEqual(response.status, 200)
         self.check_header_sanity(response.headers)
@@ -408,21 +424,21 @@ class HTTPProxyTest(BaseTest):
         with self.assertRaises(http.client.IncompleteRead):
             response.read()
 
-    def test_get_data_no_length(self):
+    def test_get_data_no_length(self) -> None:
         response = self.do_request("GET", "/data_no_length").getresponse()
         self.assertEqual(response.status, 200)
         self.check_header_sanity(response.headers)
         self.assertEqual(response.getheader("Content-Length"), None)
         self.assertEqual(response.read(), DATA)
 
-    def test_get_data_chunked(self):
+    def test_get_data_chunked(self) -> None:
         response = self.do_request("GET", "/data_chunked").getresponse()
         self.assertEqual(response.status, 200)
         self.check_header_sanity(response.headers)
         self.assertEqual(response.getheader("Content-Length"), None)
         self.assertEqual(response.read(), DATA)
 
-    def test_get_data_chunked_invalid(self):
+    def test_get_data_chunked_invalid(self) -> None:
         response = self.do_request(
             "GET", "/data_chunked_invalid"
         ).getresponse()
@@ -432,7 +448,7 @@ class HTTPProxyTest(BaseTest):
         with self.assertRaises(http.client.IncompleteRead):
             response.read()
 
-    def test_get_data_chunked_short(self):
+    def test_get_data_chunked_short(self) -> None:
         response = self.do_request("GET", "/data_chunked_short").getresponse()
         self.assertEqual(response.status, 200)
         self.check_header_sanity(response.headers)
@@ -440,7 +456,7 @@ class HTTPProxyTest(BaseTest):
         with self.assertRaises(http.client.IncompleteRead):
             response.read()
 
-    def test_basic_auth(self):
+    def test_basic_auth(self) -> None:
         with unittest.mock.patch("http_proxy.Handler.basic_auth", "secret"):
             headers = {"Proxy-Authorization": "Basic secret"}
             response = self.do_request(
@@ -451,7 +467,7 @@ class HTTPProxyTest(BaseTest):
             self.assertEqual(response.getheader("Content-Length"), str(LEN))
             self.assertEqual(response.read(), DATA)
 
-    def test_basic_auth_fail(self):
+    def test_basic_auth_fail(self) -> None:
         with unittest.mock.patch("http_proxy.Handler.basic_auth", "secret"):
             headers = {"Proxy-Authorization": "Basic wrong"}
             response = self.do_request(
@@ -460,13 +476,13 @@ class HTTPProxyTest(BaseTest):
             self.assertEqual(response.status, 407)
             self.check_header_sanity(response.headers)
 
-    def test_basic_auth_absent(self):
+    def test_basic_auth_absent(self) -> None:
         with unittest.mock.patch("http_proxy.Handler.basic_auth", "secret"):
             response = self.do_request("GET", "/data").getresponse()
             self.assertEqual(response.status, 407)
             self.check_header_sanity(response.headers)
 
-    def test_basic_auth_malformed(self):
+    def test_basic_auth_malformed(self) -> None:
         with unittest.mock.patch("http_proxy.Handler.basic_auth", "secret"):
             headers = {"Proxy-Authorization": "malformed"}
             response = self.do_request(
@@ -475,7 +491,7 @@ class HTTPProxyTest(BaseTest):
             self.assertEqual(response.status, 407)
             self.check_header_sanity(response.headers)
 
-    def test_basic_auth_wrong_scheme(self):
+    def test_basic_auth_wrong_scheme(self) -> None:
         with unittest.mock.patch("http_proxy.Handler.basic_auth", "secret"):
             headers = {"Proxy-Authorization": "Digest secret"}
             response = self.do_request(
@@ -484,7 +500,7 @@ class HTTPProxyTest(BaseTest):
             self.assertEqual(response.status, 407)
             self.check_header_sanity(response.headers)
 
-    def test_trailers(self):
+    def test_trailers(self) -> None:
         response = self.do_request("GET", "/trailers").getresponse()
         self.assertEqual(response.status, 200)
         self.check_header_sanity(response.headers)
@@ -494,7 +510,7 @@ class HTTPProxyTest(BaseTest):
         self.assertNotEqual(response.getheader("Trailer"), None)
         self.assertEqual(response.read(), DATA)
 
-    def test_reflect_headers(self):
+    def test_reflect_headers(self) -> None:
         headers = {
             "X-End-To-End": "foo",
             "X-Hop-By-Hop": "bar",
@@ -512,7 +528,7 @@ class HTTPProxyTest(BaseTest):
         )
         self.assertNotIn("X-Hop-By-Hop", seen_headers)
 
-    def test_reflect_data(self):
+    def test_reflect_data(self) -> None:
         response = self.do_request(
             "POST",
             "/reflect_data",
@@ -524,7 +540,7 @@ class HTTPProxyTest(BaseTest):
         data = response.read()
         self.assertEqual(data, DATA)
 
-    def test_reflect_data_chunked(self):
+    def test_reflect_data_chunked(self) -> None:
         response = self.do_request(
             "POST",
             "/reflect_data",
@@ -537,19 +553,19 @@ class HTTPProxyTest(BaseTest):
         data = response.read()
         self.assertEqual(data, DATA)
 
-    def test_body_bad_length(self):
+    def test_body_bad_length(self) -> None:
         response = self.do_request(
             "POST", "/empty", headers={"Content-Length": "whoopsie"}
         ).getresponse()
         self.assertEqual(response.status, 411)
         self.check_header_sanity(response.headers)
 
-    def test_body_required(self):
+    def test_body_required(self) -> None:
         response = self.do_request("POST", "/empty").getresponse()
         self.assertEqual(response.status, 411)
         self.check_header_sanity(response.headers)
 
-    def test_body_invalid_chunk(self):
+    def test_body_invalid_chunk(self) -> None:
         response = self.do_request(
             "POST",
             "/empty",
@@ -559,7 +575,7 @@ class HTTPProxyTest(BaseTest):
         self.assertEqual(response.status, 400)
         self.check_header_sanity(response.headers)
 
-    def test_pipelining(self):
+    def test_pipelining(self) -> None:
         # python's http.client doesn't support pipelining!
         # NB: this could hang depending on socket buffer sizes.
         proxy_address = self.proxy.socket.getsockname()
@@ -588,12 +604,14 @@ class HTTPProxyTest(BaseTest):
         sock.sendall(b"Connection: close\r\n")
         sock.sendall(b"\r\n")
 
-        def read_status(file_like):
+        def read_status(file_like: BinaryIO) -> Tuple[str, int, str]:
             line = file_like.readline().decode()
             version, status, reason = line.split(None, 2)
             return version, int(status), reason
 
-        def read_chunks_discard_trailer(file_like):
+        def read_chunks_discard_trailer(
+            file_like: BinaryIO,
+        ) -> Iterator[bytes]:
             while True:
                 size_line = file_like.readline()
                 size = int(size_line, 16)
@@ -610,7 +628,7 @@ class HTTPProxyTest(BaseTest):
         version, status, _ = read_status(rfile)
         self.assertEqual(version, "HTTP/1.1")
         self.assertEqual(status, 200)
-        headers = http.client.parse_headers(rfile)
+        headers = parse_headers(rfile)
         self.check_header_sanity(headers)
         self.assertEqual(headers["Content-Length"], str(LEN))
         data = rfile.read(LEN)
@@ -619,7 +637,7 @@ class HTTPProxyTest(BaseTest):
         version, status, _ = read_status(rfile)
         self.assertEqual(version, "HTTP/1.1")
         self.assertEqual(status, 200)
-        headers = http.client.parse_headers(rfile)
+        headers = parse_headers(rfile)
         self.check_header_sanity(headers)
         self.assertEqual(headers["Content-Length"], str(LEN))
         data = rfile.read(LEN)
@@ -628,7 +646,7 @@ class HTTPProxyTest(BaseTest):
         version, status, _ = read_status(rfile)
         self.assertEqual(version, "HTTP/1.1")
         self.assertEqual(status, 200)
-        headers = http.client.parse_headers(rfile)
+        headers = parse_headers(rfile)
         self.check_header_sanity(headers)
         self.assertEqual(headers["Content-Length"], str(LEN))
         data = rfile.read(LEN)
@@ -637,7 +655,7 @@ class HTTPProxyTest(BaseTest):
         version, status, _ = read_status(rfile)
         self.assertEqual(version, "HTTP/1.1")
         self.assertEqual(status, 200)
-        headers = http.client.parse_headers(rfile)
+        headers = parse_headers(rfile)
         self.check_header_sanity(headers)
         self.assertEqual(headers["Transfer-Encoding"], "chunked")
         data = b"".join(read_chunks_discard_trailer(rfile))
@@ -646,7 +664,7 @@ class HTTPProxyTest(BaseTest):
         version, status, _ = read_status(rfile)
         self.assertEqual(version, "HTTP/1.1")
         self.assertEqual(status, 403)
-        headers = http.client.parse_headers(rfile)
+        headers = parse_headers(rfile)
         self.check_header_sanity(headers)
 
         # Test the socket gets closed
@@ -656,7 +674,9 @@ class HTTPProxyTest(BaseTest):
 class ConnectMethodTest(BaseTest):
     """Tests for the CONNECT method"""
 
-    def do_connect_obj(self, path, headers=None):
+    def do_connect_obj(
+        self, path: str, headers: Dict[str, str] = None
+    ) -> http.client.HTTPConnection:
         """Execute a proxied CONNECT request.
 
         Args:
@@ -680,7 +700,9 @@ class ConnectMethodTest(BaseTest):
         conn.endheaders()
         return conn
 
-    def do_connect_obj_to_server(self, headers=None):
+    def do_connect_obj_to_server(
+        self, headers: Dict[str, str] = None
+    ) -> http.client.HTTPConnection:
         """Execute a proxied CONNECT request to the fixture server socket.
 
         Args:
@@ -693,7 +715,7 @@ class ConnectMethodTest(BaseTest):
             "%s:%d" % self.server.getsockname(), headers=headers
         )
 
-    def make_connected_pair(self):
+    def make_connected_pair(self) -> Tuple[socket.socket, socket.socket]:
         """Establish a proxied pair of connected sockets.
 
         Executes a CONNECT request to the proxy, to the fixture server socket.
@@ -716,30 +738,30 @@ class ConnectMethodTest(BaseTest):
         s_to_c, _ = self.server.accept()
 
         with c_to_s.makefile("rb") as c_rfile:
-            version, status, _ = c_rfile.readline().decode().split(None, 2)
-            status = int(status)
+            version, status_str, _ = c_rfile.readline().decode().split(None, 2)
+            status = int(status_str)
             self.assertEqual(version, "HTTP/1.1")
             self.assertGreaterEqual(status, 200)
             self.assertLess(status, 300)
-            headers = http.client.parse_headers(c_rfile)
+            headers = parse_headers(c_rfile)
             self.check_header_sanity(headers)
             self.assertEqual(headers["Connection"], "close")
 
         return c_to_s, s_to_c
 
-    def setUp(self):
+    def setUp(self) -> None:
         super().setUp()
         self.proxy_thread.start()
         self.server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.server.bind(("localhost", 0))
         self.server.listen()
 
-    def tearDown(self):
+    def tearDown(self) -> None:
         super().tearDown()
         self.proxy.shutdown()
         self.server.close()
 
-    def test_basic_auth(self):
+    def test_basic_auth(self) -> None:
         with unittest.mock.patch("http_proxy.Handler.basic_auth", "secret"):
             headers = {"Proxy-Authorization": "Basic secret"}
             response = self.do_connect_obj_to_server(
@@ -748,7 +770,7 @@ class ConnectMethodTest(BaseTest):
             self.assertEqual(response.status, 200)
             self.check_header_sanity(response.headers)
 
-    def test_basic_auth_fail(self):
+    def test_basic_auth_fail(self) -> None:
         with unittest.mock.patch("http_proxy.Handler.basic_auth", "secret"):
             headers = {"Proxy-Authorization": "Basic wrong"}
             response = self.do_connect_obj_to_server(
@@ -757,7 +779,7 @@ class ConnectMethodTest(BaseTest):
             self.assertEqual(response.status, 407)
             self.check_header_sanity(response.headers)
 
-    def test_basic_auth_malformed(self):
+    def test_basic_auth_malformed(self) -> None:
         with unittest.mock.patch("http_proxy.Handler.basic_auth", "secret"):
             headers = {"Proxy-Authorization": "malformed"}
             response = self.do_connect_obj_to_server(
@@ -766,7 +788,7 @@ class ConnectMethodTest(BaseTest):
             self.assertEqual(response.status, 407)
             self.check_header_sanity(response.headers)
 
-    def test_basic_auth_wrong_scheme(self):
+    def test_basic_auth_wrong_scheme(self) -> None:
         with unittest.mock.patch("http_proxy.Handler.basic_auth", "secret"):
             headers = {"Proxy-Authorization": "Digest secret"}
             response = self.do_connect_obj_to_server(
@@ -775,24 +797,24 @@ class ConnectMethodTest(BaseTest):
             self.assertEqual(response.status, 407)
             self.check_header_sanity(response.headers)
 
-    def test_malformed(self):
+    def test_malformed(self) -> None:
         response = self.do_connect_obj("malformed").getresponse()
         self.assertGreaterEqual(response.status, 400)
         self.assertLess(response.status, 500)
         self.check_header_sanity(response.headers)
 
-    def test_nonexistent_gateway(self):
+    def test_nonexistent_gateway(self) -> None:
         response = self.do_connect_obj("does-not-exist:80").getresponse()
         self.assertEqual(response.status, 502)
         self.check_header_sanity(response.headers)
 
-    def test_gateway_timeout(self):
+    def test_gateway_timeout(self) -> None:
         with unittest.mock.patch("http_proxy.Handler.timeout", 1):
             response = self.do_connect_obj("0.0.0.1:80").getresponse()
             self.assertEqual(response.status, 504)
             self.check_header_sanity(response.headers)
 
-    def test_shutdown_on_read_timeout(self):
+    def test_shutdown_on_read_timeout(self) -> None:
         with unittest.mock.patch("http_proxy.Handler.timeout", 1):
             c_to_s, s_to_c = self.make_connected_pair()
             # Client and server send greetings, then get closed due to
@@ -804,7 +826,7 @@ class ConnectMethodTest(BaseTest):
             with c_to_s.makefile("rb") as c_rfile:
                 self.assertEqual(c_rfile.read(), b"abcd")
 
-    def test_connect_and_close_upstream(self):
+    def test_connect_and_close_upstream(self) -> None:
         c_to_s, s_to_c = self.make_connected_pair()
         c_rfile = c_to_s.makefile("rb")
         s_rfile = s_to_c.makefile("rb")
@@ -821,7 +843,7 @@ class ConnectMethodTest(BaseTest):
         s_rfile.close()
         self.assertEqual(c_rfile.read(), b"goodbye")
 
-    def test_connect_and_close_client(self):
+    def test_connect_and_close_client(self) -> None:
         c_to_s, s_to_c = self.make_connected_pair()
         c_rfile = c_to_s.makefile("rb")
         s_rfile = s_to_c.makefile("rb")
@@ -840,7 +862,7 @@ class ConnectMethodTest(BaseTest):
 
 
 class MainTest(BaseTest):
-    def setUp(self):
+    def setUp(self) -> None:
         super().setUp()
         self.httpd_thread.start()
         self.main = http_proxy.Main()
@@ -848,18 +870,20 @@ class MainTest(BaseTest):
             name="main", target=self.main.run, daemon=True
         )
 
-    def tearDown(self):
+    def tearDown(self) -> None:
         super().tearDown()
         self.httpd.shutdown()
         self.main.shutdown()
 
-    def get_unused_address(self):
+    def get_unused_address(self) -> Tuple[str, int]:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
             sock.bind(("localhost", 0))
-            return sock.getsockname()
+            return cast(Tuple[str, int], sock.getsockname())
 
     @contextlib.contextmanager
-    def start_and_connect(self, *args):
+    def start_and_connect(
+        self, *args: str
+    ) -> Iterator[http.client.HTTPConnection]:
         host, port = self.get_unused_address()
         argv = ["http_proxy", "--bind-host", host, "--port", str(port)]
         argv += args
@@ -877,7 +901,7 @@ class MainTest(BaseTest):
                 time.sleep(0.1)
             yield http.client.HTTPConnection(host, port=port)
 
-    def test_normal_startup(self):
+    def test_normal_startup(self) -> None:
         with self.start_and_connect() as conn:
             self.putrequest_proxy_to_httpd(conn, "GET", "/empty")
             conn.endheaders()
@@ -887,7 +911,7 @@ class MainTest(BaseTest):
             self.assertEqual(response.getheader("Content-Length"), "0")
             self.assertEqual(response.read(), b"")
 
-    def test_auth_fail(self):
+    def test_auth_fail(self) -> None:
         with self.start_and_connect("--basic-auth", "test:test") as conn:
             self.putrequest_proxy_to_httpd(conn, "GET", "/empty")
             conn.endheaders()
@@ -895,7 +919,7 @@ class MainTest(BaseTest):
             self.assertEqual(response.status, 407)
             self.check_header_sanity(response.headers)
 
-    def test_auth_pass(self):
+    def test_auth_pass(self) -> None:
         with self.start_and_connect("--basic-auth", "test:test") as conn:
             self.putrequest_proxy_to_httpd(conn, "GET", "/empty")
             conn.putheader(
