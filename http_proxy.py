@@ -44,15 +44,15 @@ class _HTTPError(Exception):
 
     Attributes:
         code: The HTTP error code (4xx or 5xx) we should return.
-        message: The "reason"/"message" part we should return in the status
+        msg: The "reason"/"message" part we should return in the status
             line.
         explain: The full body of the error message, usually a traceback.
     """
 
-    def __init__(self, code: int, message: str = None, explain: str = None):
-        super().__init__()
+    def __init__(self, code: int, msg: str = None, explain: str = None):
+        super().__init__(code, msg, explain)
         self.code = code
-        self.message = message
+        self.msg = msg
         self.explain = explain
 
 
@@ -260,8 +260,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 else:
                     upstream.sendall(data)
 
-    # pylint:disable=invalid-name
-    def do_CONNECT(self) -> None:
+    def do_CONNECT(self) -> None:  # noqa: N802
         """Handler for the CONNECT method.
 
         Should be called from the superclass handler logic.
@@ -273,7 +272,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
             upstream = self.connect_request()
         except _HTTPError as err:
-            self.send_error(err.code, message=err.message, explain=err.explain)
+            self.send_error(err.code, message=err.msg, explain=err.explain)
         except Exception:
             self.log_error("%s", traceback.format_exc())
             self.send_error(500, explain=traceback.format_exc())
@@ -311,7 +310,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         url = urllib.parse.urlsplit(self.path)
 
         if url.scheme != "http":
-            raise _HTTPError(400, message="Target scheme is not http")
+            raise _HTTPError(400, msg="Target scheme is not http")
 
         message_body: Optional[Iterable[bytes]]
         # We need to read only the expected amount from the client
@@ -336,9 +335,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 url.netloc, timeout=self.timeout
             )
         except http.client.InvalidURL as exc:
-            raise _HTTPError(
-                400, message=str(exc), explain=traceback.format_exc()
-            )
+            raise _HTTPError(400, msg=str(exc), explain=traceback.format_exc())
 
         path = urllib.parse.urlunsplit(("", "", url.path, url.query, ""))
         upstream.putrequest(
@@ -346,10 +343,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         )
 
         connection_tokens = []
-        filter_headers = set(
-            ("proxy-authorization", "connection", "keep-alive")
-        )
-        pass_headers = set(("transfer-encoding", "te", "trailer"))
+        filter_headers = {"proxy-authorization", "connection", "keep-alive"}
+        pass_headers = {"transfer-encoding", "te", "trailer"}
         if "Connection" in self.headers:
             request_connection_tokens = [
                 token.strip()
@@ -394,9 +389,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             raise _HTTPError(502, explain=traceback.format_exc())
         except ChunkError as exc:
             upstream.close()
-            raise _HTTPError(
-                400, message=str(exc), explain=traceback.format_exc()
-            )
+            raise _HTTPError(400, msg=str(exc), explain=traceback.format_exc())
 
     def proxy_response(self, response: http.client.HTTPResponse) -> None:
         """Forwards an upstream response back to the client.
@@ -412,10 +405,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_response_only(response.status, response.reason)
 
         connection_tokens = []
-        filter_headers = set(
-            ("proxy-authorization", "connection", "keep-alive")
-        )
-        pass_headers = set(("transfer-encoding", "te", "trailer"))
+        filter_headers = {"proxy-authorization", "connection", "keep-alive"}
+        pass_headers = {"transfer-encoding", "te", "trailer"}
         if response.getheader("Connection"):
             response_connection_tokens = [
                 token.strip()
@@ -478,7 +469,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
             upstream, response = self.proxy_request()
         except _HTTPError as exc:
-            self.send_error(exc.code, message=exc.message, explain=exc.explain)
+            self.send_error(exc.code, message=exc.msg, explain=exc.explain)
         except Exception:
             self.log_error("%s", traceback.format_exc())
             self.send_error(500, explain=traceback.format_exc())
@@ -494,43 +485,35 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         upstream.close()
 
-    # pylint:disable=invalid-name
-    def do_GET(self) -> None:
+    def do_GET(self) -> None:  # noqa: N802
         """Handles a proxy GET request."""
         self.do_proxy()
 
-    # pylint:disable=invalid-name
-    def do_POST(self) -> None:
+    def do_POST(self) -> None:  # noqa: N802
         """Handles a proxy POST request."""
         self.do_proxy()
 
-    # pylint:disable=invalid-name
-    def do_PUT(self) -> None:
+    def do_PUT(self) -> None:  # noqa: N802
         """Handles a proxy PUT request."""
         self.do_proxy()
 
-    # pylint:disable=invalid-name
-    def do_PATCH(self) -> None:
+    def do_PATCH(self) -> None:  # noqa: N802
         """Handles a proxy PATCH request."""
         self.do_proxy()
 
-    # pylint:disable=invalid-name
-    def do_HEAD(self) -> None:
+    def do_HEAD(self) -> None:  # noqa: N802
         """Handles a proxy HEAD request."""
         self.do_proxy()
 
-    # pylint:disable=invalid-name
-    def do_OPTIONS(self) -> None:
+    def do_OPTIONS(self) -> None:  # noqa: N802
         """Handles a proxy OPTIONS request."""
         self.do_proxy()
 
-    # pylint:disable=invalid-name
-    def do_DELETE(self) -> None:
+    def do_DELETE(self) -> None:  # noqa: N802
         """Handles a proxy DELETE request."""
         self.do_proxy()
 
-    # pylint:disable=invalid-name
-    def do_TRACE(self) -> None:
+    def do_TRACE(self) -> None:  # noqa: N802
         """Handles a proxy TRACE request."""
         self.do_proxy()
 

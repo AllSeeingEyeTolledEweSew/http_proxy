@@ -44,8 +44,6 @@ def parse_headers(fp: BinaryIO) -> http.client.HTTPMessage:
 class FixtureHandler(http.server.BaseHTTPRequestHandler):
     """Handler class for HTTP server test cases."""
 
-    # pylint: disable=too-many-public-methods
-
     def path_empty(self) -> None:
         """Send an empty response with Content-Length: 0"""
         self.send_response(200)
@@ -146,9 +144,10 @@ class FixtureHandler(http.server.BaseHTTPRequestHandler):
 
     def path_reflect_headers(self) -> None:
         """Send the received headers and status line as JSON"""
-        data_dict = dict(
-            requestline=self.requestline, headers=dict(self.headers.items())
-        )
+        data_dict = {
+            "requestline": self.requestline,
+            "headers": dict(self.headers.items()),
+        }
         data = json.dumps(data_dict).encode()
         self.send_response(200)
         self.send_header("Connection", "close")
@@ -196,38 +195,31 @@ class FixtureHandler(http.server.BaseHTTPRequestHandler):
         else:
             self.send_error(404)
 
-    # pylint: disable=invalid-name
-    def do_GET(self) -> None:
+    def do_GET(self) -> None:  # noqa: N802
         """Handle a test GET request"""
         self.dispatch()
 
-    # pylint: disable=invalid-name
-    def do_PUT(self) -> None:
+    def do_PUT(self) -> None:  # noqa: N802
         """Handle a test PUT request"""
         self.dispatch()
 
-    # pylint: disable=invalid-name
-    def do_PATCH(self) -> None:
+    def do_PATCH(self) -> None:  # noqa: N802
         """Handle a test PATCH request"""
         self.dispatch()
 
-    # pylint: disable=invalid-name
-    def do_POST(self) -> None:
+    def do_POST(self) -> None:  # noqa: N802
         """Handle a test POST request"""
         self.dispatch()
 
-    # pylint: disable=invalid-name
-    def do_HEAD(self) -> None:
+    def do_HEAD(self) -> None:  # noqa: N802
         """Handle a test HEAD request"""
         self.dispatch()
 
-    # pylint: disable=invalid-name
-    def do_OPTIONS(self) -> None:
+    def do_OPTIONS(self) -> None:  # noqa: N802
         """Handle a test OPTIONS request"""
         self.dispatch()
 
-    # pylint: disable=invalid-name
-    def do_TRACE(self) -> None:
+    def do_TRACE(self) -> None:  # noqa: N802
         """Handle a test TRACE request"""
         self.dispatch()
 
@@ -277,8 +269,6 @@ class BaseTest(unittest.TestCase):
 
 class HTTPProxyTest(BaseTest):
     """Tests for normal HTTP methods (not CONNECT)."""
-
-    # pylint: disable=too-many-public-methods
 
     def setUp(self) -> None:
         super().setUp()
