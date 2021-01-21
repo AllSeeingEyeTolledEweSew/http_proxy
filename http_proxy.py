@@ -191,7 +191,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return True
 
         # send_error doesn't let us send headers, so do it by hand
-        self.log_error("code %d, message %s", 407, "Proxy authorization required")
+        self.log_error(
+            "code %d, message %s", 407, "Proxy authorization required"
+        )
         self.send_response(407, "Proxy authorization required")
         self.send_header("Connection", "close")
         self.send_header("Proxy-Authenticate", "Basic")
@@ -318,9 +320,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
             raise _HTTPError(411)
 
         try:
-            upstream = http.client.HTTPConnection(url.netloc, timeout=self.timeout)
+            upstream = http.client.HTTPConnection(
+                url.netloc, timeout=self.timeout
+            )
         except http.client.InvalidURL as exc:
-            raise _HTTPError(400, message=str(exc), explain=traceback.format_exc())
+            raise _HTTPError(
+                400, message=str(exc), explain=traceback.format_exc()
+            )
 
         path = urllib.parse.urlunsplit(("", "", url.path, url.query, ""))
         upstream.putrequest(
@@ -328,11 +334,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
         )
 
         connection_tokens = []
-        filter_headers = set(("proxy-authorization", "connection", "keep-alive"))
+        filter_headers = set(
+            ("proxy-authorization", "connection", "keep-alive")
+        )
         pass_headers = set(("transfer-encoding", "te", "trailer"))
         if "Connection" in self.headers:
             request_connection_tokens = [
-                token.strip() for token in self.headers["Connection"].split(",")
+                token.strip()
+                for token in self.headers["Connection"].split(",")
             ]
         else:
             request_connection_tokens = []
@@ -373,7 +382,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             raise _HTTPError(502, explain=traceback.format_exc())
         except ChunkError as exc:
             upstream.close()
-            raise _HTTPError(400, message=str(exc), explain=traceback.format_exc())
+            raise _HTTPError(
+                400, message=str(exc), explain=traceback.format_exc()
+            )
 
     def proxy_response(self, response):
         """Forwards an upstream response back to the client.
@@ -389,11 +400,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_response_only(response.code, response.reason)
 
         connection_tokens = []
-        filter_headers = set(("proxy-authorization", "connection", "keep-alive"))
+        filter_headers = set(
+            ("proxy-authorization", "connection", "keep-alive")
+        )
         pass_headers = set(("transfer-encoding", "te", "trailer"))
         if response.getheader("Connection"):
             response_connection_tokens = [
-                token.strip() for token in response.getheader("Connection").split(",")
+                token.strip()
+                for token in response.getheader("Connection").split(",")
             ]
         else:
             response_connection_tokens = []
@@ -509,7 +523,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.do_proxy()
 
 
-class _ThreadingHTTPServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
+class _ThreadingHTTPServer(
+    socketserver.ThreadingMixIn, http.server.HTTPServer
+):
 
     daemon_threads = True
 

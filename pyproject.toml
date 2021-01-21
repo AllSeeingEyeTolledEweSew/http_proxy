@@ -8,3 +8,6 @@ build-backend = "setuptools.build_meta"
 profile = "google"
 single_line_exclusions = []
 src_paths = ["."]
+
+[tool.black]
+line-length = 79
